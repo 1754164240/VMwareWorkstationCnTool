@@ -7,10 +7,12 @@ public sealed class MainForm : Form
 {
     private readonly VMwareInstallationLocator locator = new();
     private readonly LocalizationService localizationService = LocalizationService.CreateDefault();
+    private readonly VMwareReleaseService releaseService = new(new HttpClient());
     private readonly TextBox installPathTextBox = new();
     private readonly Label versionValueLabel = new();
     private readonly TextBox logTextBox = new();
     private readonly Button localizeButton = new();
+    private readonly Button downloadLatestButton = new();
     private VMwareInstallationInfo currentInstallation = VMwareInstallationInfo.NotFound("尚未检测。");
 
     public MainForm()
@@ -111,6 +113,21 @@ public sealed class MainForm : Form
         localizeButton.Height = 36;
         localizeButton.Click += (_, _) => Localize();
 
+        downloadLatestButton.Text = "下载最新版";
+        downloadLatestButton.Width = 120;
+        downloadLatestButton.Height = 36;
+        downloadLatestButton.Margin = new Padding(8, 0, 0, 0);
+        downloadLatestButton.Click += async (_, _) => await DownloadLatestInstallerAsync();
+
+        var openReleasesButton = new Button
+        {
+            Text = "打开下载页",
+            Width = 120,
+            Height = 36,
+            Margin = new Padding(8, 0, 0, 0)
+        };
+        openReleasesButton.Click += (_, _) => OpenLatestDownloadPage();
+
         var refreshButton = new Button
         {
             Text = "重新检测",
@@ -121,6 +138,8 @@ public sealed class MainForm : Form
         refreshButton.Click += (_, _) => DetectInstallation();
 
         buttonPanel.Controls.Add(localizeButton);
+        buttonPanel.Controls.Add(downloadLatestButton);
+        buttonPanel.Controls.Add(openReleasesButton);
         buttonPanel.Controls.Add(refreshButton);
 
         root.Controls.Add(titleLabel);
@@ -197,6 +216,78 @@ public sealed class MainForm : Form
         {
             localizeButton.Enabled = currentInstallation.IsFound;
         }
+    }
+
+    private async Task DownloadLatestInstallerAsync()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "请选择最新版 VMware Workstation 安装包保存目录",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = true,
+            SelectedPath = VMwareReleaseService.GetDefaultDownloadDirectory()
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            downloadLatestButton.Enabled = false;
+            AppendLog("正在获取最新版 VMware Workstation 信息...");
+            var result = await releaseService.DownloadLatestWindowsInstallerAsync(dialog.SelectedPath, CancellationToken.None);
+            AppendLog($"已下载 {result.Release.TagName}：{result.FilePath}");
+
+            var openFolder = MessageBox.Show(
+                this,
+                $"下载完成：{result.FilePath}{Environment.NewLine}是否打开所在文件夹？",
+                "下载完成",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+
+            if (openFolder == DialogResult.Yes)
+            {
+                OpenFileLocation(result.FilePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog(ex.Message);
+            MessageBox.Show(this, ex.Message, "下载失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            downloadLatestButton.Enabled = true;
+        }
+    }
+
+    private void OpenLatestDownloadPage()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = VMwareReleaseService.ReleasesUrl,
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            AppendLog(ex.Message);
+            MessageBox.Show(this, ex.Message, "无法打开下载页", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static void OpenFileLocation(string filePath)
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"/select,\"{filePath}\"",
+            UseShellExecute = true
+        });
     }
 
     private void AppendLog(string message)

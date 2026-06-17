@@ -11,6 +11,8 @@
 - 自动检测 VMware Workstation 安装目录
 - 检测不到安装目录时支持手动选择
 - 显示当前检测到的 VMware Workstation 版本
+- 打开最新版 VMware Workstation 下载页
+- 直接下载指定仓库最新 Release 中的 Windows exe 安装包
 - 自动写入 `%APPDATA%\VMware\preferences.ini`
 - 覆盖已有 `zh_CN` 前会自动备份
 - 单文件绿色版发布，双击即可运行
@@ -25,6 +27,11 @@
 5. 重启 VMware Workstation
 
 如果没有自动检测到安装目录，可以点击“选择...”手动选择 VMware Workstation 的安装目录。
+
+如果需要下载最新版 VMware Workstation，可以点击：
+
+- “打开下载页”：跳转到 <https://github.com/201853910/VMwareWorkstation/releases/>
+- “下载最新版”：自动读取该仓库最新 Release，并下载其中的 Windows `.exe` 安装包
 
 ## 汉化逻辑
 
@@ -138,6 +145,8 @@ dotnet test .\VMwareWorkstationCnTool.Tests\VMwareWorkstationCnTool.Tests.csproj
 - VMware 安装目录检测
 - 手动目录校验
 - 当前版本读取
+- 最新 VMware Workstation Release 解析
+- Windows exe 安装包选择和下载
 - 内置语言包读取
 - `zh_CN` 安装和备份
 - `preferences.ini` 写入
