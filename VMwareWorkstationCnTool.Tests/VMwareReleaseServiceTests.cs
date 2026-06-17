@@ -137,6 +137,51 @@ public sealed class VMwareReleaseServiceTests
     }
 
     [Fact]
+    public async Task 下载最新版安装包时会报告下载进度()
+    {
+        using var directory = TestDirectory.Create();
+        var progressEvents = new List<DownloadProgress>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.RequestUri?.AbsoluteUri.EndsWith("/releases/latest", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var json = """
+                {
+                  "tag_name": "26H1",
+                  "html_url": "https://github.com/201853910/VMwareWorkstation/releases/tag/26H1",
+                  "assets": [
+                    {
+                      "name": "VMware-Workstation-Full-26H1-25388281.exe",
+                      "browser_download_url": "https://example.com/windows.exe",
+                      "size": 4
+                    }
+                  ]
+                }
+                """;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            }
+
+            var content = new ByteArrayContent(new byte[] { 1, 2, 3, 4 });
+            content.Headers.ContentLength = 4;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = content
+            };
+        });
+        using var httpClient = new HttpClient(handler);
+        var service = new VMwareReleaseService(httpClient);
+
+        await service.DownloadLatestWindowsInstallerAsync(directory.Path, new Progress<DownloadProgress>(progressEvents.Add), CancellationToken.None);
+
+        var lastProgress = Assert.Single(progressEvents, item => item.Percent == 100);
+        Assert.Equal(4, lastProgress.BytesReceived);
+        Assert.Equal(4, lastProgress.TotalBytes);
+    }
+
+    [Fact]
     public async Task Api限流时会自动改用Releases网页()
     {
         using var directory = TestDirectory.Create();
