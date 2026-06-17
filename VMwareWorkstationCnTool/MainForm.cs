@@ -10,7 +10,10 @@ public sealed class MainForm : Form
     private readonly VMwareReleaseService releaseService = new(new HttpClient());
     private readonly TextBox installPathTextBox = new();
     private readonly Label versionValueLabel = new();
+    private readonly Label latestVersionValueLabel = new();
     private readonly TextBox logTextBox = new();
+    private readonly ProgressBar downloadProgressBar = new();
+    private readonly Label downloadProgressLabel = new();
     private readonly Button localizeButton = new();
     private readonly Button downloadLatestButton = new();
     private VMwareInstallationInfo currentInstallation = VMwareInstallationInfo.NotFound("尚未检测。");
@@ -34,12 +37,13 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(18),
             ColumnCount = 1,
-            RowCount = 5
+            RowCount = 6
         };
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var titleLabel = new Label
@@ -92,7 +96,13 @@ public sealed class MainForm : Form
         versionPanel.Controls.Add(new Label { Text = "当前 VMware 版本：", AutoSize = true });
         versionValueLabel.AutoSize = true;
         versionValueLabel.Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold);
+        versionValueLabel.Margin = new Padding(0, 0, 26, 0);
         versionPanel.Controls.Add(versionValueLabel);
+        versionPanel.Controls.Add(new Label { Text = "最新版本：", AutoSize = true });
+        latestVersionValueLabel.Text = "获取中...";
+        latestVersionValueLabel.AutoSize = true;
+        latestVersionValueLabel.Font = new Font(Font.FontFamily, Font.Size, FontStyle.Bold);
+        versionPanel.Controls.Add(latestVersionValueLabel);
 
         logTextBox.Dock = DockStyle.Fill;
         logTextBox.Multiline = true;
@@ -100,6 +110,24 @@ public sealed class MainForm : Form
         logTextBox.ScrollBars = ScrollBars.Vertical;
         logTextBox.BackColor = SystemColors.Window;
         logTextBox.Margin = new Padding(0, 0, 0, 14);
+
+        var progressPanel = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 2,
+            AutoSize = true,
+            Margin = new Padding(0, 0, 0, 12)
+        };
+        progressPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        progressPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        downloadProgressBar.Dock = DockStyle.Fill;
+        downloadProgressBar.Height = 20;
+        downloadProgressBar.Style = ProgressBarStyle.Continuous;
+        downloadProgressLabel.Text = "未开始下载";
+        downloadProgressLabel.AutoSize = true;
+        downloadProgressLabel.Margin = new Padding(10, 2, 0, 0);
+        progressPanel.Controls.Add(downloadProgressBar, 0, 0);
+        progressPanel.Controls.Add(downloadProgressLabel, 1, 0);
 
         var buttonPanel = new FlowLayoutPanel
         {
@@ -146,6 +174,7 @@ public sealed class MainForm : Form
         root.Controls.Add(pathPanel);
         root.Controls.Add(versionPanel);
         root.Controls.Add(logTextBox);
+        root.Controls.Add(progressPanel);
         root.Controls.Add(buttonPanel);
         Controls.Add(root);
     }
@@ -154,6 +183,7 @@ public sealed class MainForm : Form
     {
         currentInstallation = locator.Find();
         ApplyInstallationInfo(currentInstallation);
+        _ = RefreshLatestVersionAsync();
     }
 
     private void ChooseInstallationPath()
@@ -236,8 +266,13 @@ public sealed class MainForm : Form
         try
         {
             downloadLatestButton.Enabled = false;
+            ResetDownloadProgress();
             AppendLog("正在获取最新版 VMware Workstation 信息...");
-            var result = await releaseService.DownloadLatestWindowsInstallerAsync(dialog.SelectedPath, CancellationToken.None);
+            var progress = new Progress<DownloadProgress>(UpdateDownloadProgress);
+            var result = await releaseService.DownloadLatestWindowsInstallerAsync(dialog.SelectedPath, progress, CancellationToken.None);
+            UpdateLatestVersion(result.Release);
+            var downloadedFileLength = new FileInfo(result.FilePath).Length;
+            UpdateDownloadProgress(new DownloadProgress(downloadedFileLength, downloadedFileLength));
             AppendLog($"已下载 {result.Release.TagName}：{result.FilePath}");
 
             var openFolder = MessageBox.Show(
@@ -261,6 +296,63 @@ public sealed class MainForm : Form
         {
             downloadLatestButton.Enabled = true;
         }
+    }
+
+    private async Task RefreshLatestVersionAsync()
+    {
+        try
+        {
+            latestVersionValueLabel.Text = "获取中...";
+            var release = await releaseService.GetLatestReleaseAsync(CancellationToken.None);
+            UpdateLatestVersion(release);
+        }
+        catch (Exception ex)
+        {
+            latestVersionValueLabel.Text = "获取失败";
+            AppendLog($"获取最新版失败：{ex.Message}");
+        }
+    }
+
+    private void UpdateLatestVersion(VMwareReleaseInfo release)
+    {
+        latestVersionValueLabel.Text = release.TagName;
+        AppendLog($"最新版 VMware Workstation：{release.TagName}（{release.WindowsAsset.Name}）");
+    }
+
+    private void ResetDownloadProgress()
+    {
+        downloadProgressBar.Style = ProgressBarStyle.Continuous;
+        downloadProgressBar.Value = 0;
+        downloadProgressLabel.Text = "准备下载";
+    }
+
+    private void UpdateDownloadProgress(DownloadProgress progress)
+    {
+        if (progress.Percent is { } percent)
+        {
+            downloadProgressBar.Style = ProgressBarStyle.Continuous;
+            downloadProgressBar.Value = Math.Clamp(percent, 0, 100);
+            downloadProgressLabel.Text = $"{percent}%  {FormatBytes(progress.BytesReceived)} / {FormatBytes(progress.TotalBytes!.Value)}";
+        }
+        else
+        {
+            downloadProgressBar.Style = ProgressBarStyle.Marquee;
+            downloadProgressLabel.Text = $"{FormatBytes(progress.BytesReceived)} / 未知大小";
+        }
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB"];
+        double value = bytes;
+        var unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.Length - 1)
+        {
+            value /= 1024;
+            unitIndex++;
+        }
+
+        return unitIndex == 0 ? $"{bytes} {units[unitIndex]}" : $"{value:F1} {units[unitIndex]}";
     }
 
     private void OpenLatestDownloadPage()
