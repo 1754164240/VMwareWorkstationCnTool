@@ -116,6 +116,11 @@ public sealed class VMwareReleaseService
 
     public async Task<VMwareInstallerDownloadResult> DownloadLatestWindowsInstallerAsync(string targetDirectory, CancellationToken cancellationToken)
     {
+        return await DownloadLatestWindowsInstallerAsync(targetDirectory, progress: null, cancellationToken);
+    }
+
+    public async Task<VMwareInstallerDownloadResult> DownloadLatestWindowsInstallerAsync(string targetDirectory, IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
+    {
         var release = await GetLatestReleaseAsync(cancellationToken);
         Directory.CreateDirectory(targetDirectory);
 
@@ -125,7 +130,7 @@ public sealed class VMwareReleaseService
 
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var destination = File.Create(filePath);
-        await source.CopyToAsync(destination, cancellationToken);
+        await CopyToAsync(source, destination, response.Content.Headers.ContentLength ?? (release.WindowsAsset.Size > 0 ? release.WindowsAsset.Size : null), progress, cancellationToken);
 
         return new VMwareInstallerDownloadResult(filePath, release);
     }
@@ -150,6 +155,26 @@ public sealed class VMwareReleaseService
 
         var assetsHtml = await assetsResponse.Content.ReadAsStringAsync(cancellationToken);
         return ParseExpandedAssetsPage(tagName, assetsHtml);
+    }
+
+    private static async Task CopyToAsync(Stream source, Stream destination, long? totalBytes, IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[81920];
+        long bytesReceived = 0;
+        progress?.Report(new DownloadProgress(bytesReceived, totalBytes));
+
+        while (true)
+        {
+            var bytesRead = await source.ReadAsync(buffer, cancellationToken);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+            bytesReceived += bytesRead;
+            progress?.Report(new DownloadProgress(bytesReceived, totalBytes));
+        }
     }
 
     private sealed class GitHubReleaseResponse
